@@ -4,17 +4,18 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"time"
 )
 
 func main() {
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 3000*time.Millisecond)
 
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:8080", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://localhost:8080/cotacao", nil)
 	if err != nil {
 		panic(err)
 	}
@@ -26,7 +27,10 @@ func main() {
 
 	defer res.Body.Close()
 
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	fmt.Println(string(body))
 }

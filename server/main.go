@@ -8,7 +8,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"os"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -33,19 +32,17 @@ type ExchangeRate struct {
 }
 
 func main() {
-	os.Remove("sqlite3.db")
-
 	db, err := sql.Open("sqlite3", "sqlite3.db")
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	defer db.Close()
+	Migrate(db)
+	db.Close()
 
 	http.HandleFunc("/cotacao", Handler)
 	fmt.Println("Http Server listening on port 8080")
 
-	err := http.ListenAndServe(":8080", nil)
+	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
 		panic(err)
 	}
@@ -64,19 +61,52 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(e)
-}
-
-func PersistCurrency(ctx context.Context, db *sql.DB) {
-	db, err := sql.Open("sqlite3", "sqlite3.db")
+	err = PersistCurrency(db_ctx, e)
 	if err != nil {
 		log.Fatal(err)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(e.USDBRL.Bid)
+}
+func PersistCurrency(ctx context.Context, data *USDBRL) error {
+	stmt := `INSERT INTO USDBRL(code, codein, name, high, low, var_bid, pct_change, bid, ask, timestamp, create_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	db, err := sql.Open("sqlite3", "sqlite3.db")
+	if err != nil {
+		return err
+	}
+
+	_, err = db.Exec(stmt, data.USDBRL.Code, data.USDBRL.Codein, data.USDBRL.Name, data.USDBRL.High, data.USDBRL.Low, data.USDBRL.VarBid, data.USDBRL.PctChange, data.USDBRL.Bid, data.USDBRL.Ask, data.USDBRL.Timestamp, data.USDBRL.CreateDate)
+
 	defer db.Close()
 
+	return nil
+}
+
+func Migrate(db *sql.DB) error {
+	sqlStmt := `
+	CREATE TABLE IF NOT EXISTS USDBRL (
+		id integer primary key autoincrement,
+		code varchar(80),
+		codein varchar(80),
+		name varchar(80),
+		high varchar(80),
+		low varchar(80),
+		var_bid varchar(80),
+		pct_change varchar(80),
+		bid varchar(80),
+		ask varchar(80),
+		timestamp timestamp,
+		create_date timestamp
+	)
+	`
+	_, err := db.Exec(sqlStmt)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func SearchCurrency(ctx context.Context, CurrencyCode string) (*USDBRL, error) {
@@ -86,25 +116,25 @@ func SearchCurrency(ctx context.Context, CurrencyCode string) (*USDBRL, error) {
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://economia.awesomeapi.com.br/json/last/"+CurrencyCode, nil)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	defer res.Body.Close()
 
 	body, err := io.ReadAll(res.Body)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	var e USDBRL
 	err = json.Unmarshal(body, &e)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
 	return &e, nil
