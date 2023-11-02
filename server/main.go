@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"os"
 	"time"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 type USDBRL struct {
@@ -29,6 +33,15 @@ type ExchangeRate struct {
 }
 
 func main() {
+	os.Remove("sqlite3.db")
+
+	db, err := sql.Open("sqlite3", "sqlite3.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer db.Close()
+
 	http.HandleFunc("/cotacao", Handler)
 	fmt.Println("Http Server listening on port 8080")
 
@@ -57,6 +70,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 }
 
 func PersistCurrency(ctx context.Context, db *sql.DB) {
+	db, err := sql.Open("sqlite3", "sqlite3.db")
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer db.Close()
 
 }
 
