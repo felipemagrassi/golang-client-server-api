@@ -32,56 +32,111 @@ type ExchangeRate struct {
 }
 
 func main() {
-	db, err := sql.Open("sqlite3", "sqlite3.db")
+	_, err := InitializeDatabase()
 	if err != nil {
 		log.Fatal(err)
 	}
-	Migrate(db)
-	db.Close()
 
 	http.HandleFunc("/cotacao", Handler)
 	fmt.Println("Http Server listening on port 8080")
 
 	err = http.ListenAndServe(":8080", nil)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }
 
 func Handler(w http.ResponseWriter, r *http.Request) {
-	http_ctx, http_cancel := context.WithTimeout(context.Background(), time.Millisecond*200)
-	defer http_cancel()
+	ctx := r.Context()
 
-	db_ctx, db_cancel := context.WithTimeout(context.Background(), time.Millisecond*10)
-	defer db_cancel()
-
-	e, err := SearchCurrency(http_ctx, "")
+	e, err := SearchCurrency(ctx)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 	}
 
-	err = PersistCurrency(db_ctx, e)
+	err = PersistCurrency(ctx, e)
 	if err != nil {
-		log.Fatal(err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(e.USDBRL.Bid)
 }
+
 func PersistCurrency(ctx context.Context, data *USDBRL) error {
-	stmt := `INSERT INTO USDBRL(code, codein, name, high, low, var_bid, pct_change, bid, ask, timestamp, create_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	log.Println("Persisting currency")
 	db, err := sql.Open("sqlite3", "sqlite3.db")
 	if err != nil {
 		return err
 	}
 
-	_, err = db.Exec(stmt, data.USDBRL.Code, data.USDBRL.Codein, data.USDBRL.Name, data.USDBRL.High, data.USDBRL.Low, data.USDBRL.VarBid, data.USDBRL.PctChange, data.USDBRL.Bid, data.USDBRL.Ask, data.USDBRL.Timestamp, data.USDBRL.CreateDate)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+
+	stmt := `INSERT INTO USDBRL(code, codein, name, high, low, var_bid, pct_change, bid, ask, timestamp, create_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	_, err = db.ExecContext(ctx, stmt, data.USDBRL.Code, data.USDBRL.Codein, data.USDBRL.Name, data.USDBRL.High, data.USDBRL.Low, data.USDBRL.VarBid, data.USDBRL.PctChange, data.USDBRL.Bid, data.USDBRL.Ask, data.USDBRL.Timestamp, data.USDBRL.CreateDate)
+	if err != nil {
+		return err
+	}
+	log.Println("Inserted data")
 
 	defer db.Close()
 
 	return nil
+}
+
+func SearchCurrency(ctx context.Context) (*USDBRL, error) {
+	log.Println("Searching currency")
+
+	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://economia.awesomeapi.com.br/json/last/USD-BRL", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var e USDBRL
+	err = json.Unmarshal(body, &e)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("Found data")
+
+	return &e, nil
+}
+
+func InitializeDatabase() (*sql.DB, error) {
+	database, err := sql.Open("sqlite3", "sqlite3.db")
+	defer database.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = Migrate(database)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println("Created table")
+
+	return database, nil
 }
 
 func Migrate(db *sql.DB) error {
@@ -97,8 +152,8 @@ func Migrate(db *sql.DB) error {
 		pct_change varchar(80),
 		bid varchar(80),
 		ask varchar(80),
-		timestamp timestamp,
-		create_date timestamp
+		timestamp varchar(80),
+		create_date varchar(80)
 	)
 	`
 	_, err := db.Exec(sqlStmt)
@@ -107,35 +162,4 @@ func Migrate(db *sql.DB) error {
 	}
 
 	return nil
-}
-
-func SearchCurrency(ctx context.Context, CurrencyCode string) (*USDBRL, error) {
-	if CurrencyCode == "" {
-		CurrencyCode = "USD-BRL"
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://economia.awesomeapi.com.br/json/last/"+CurrencyCode, nil)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	defer res.Body.Close()
-
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	var e USDBRL
-	err = json.Unmarshal(body, &e)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	return &e, nil
 }

@@ -6,12 +6,20 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"time"
 )
 
 func main() {
+	file, err := os.Create("cotacao.txt")
+	if err != nil {
+		panic(err)
+	}
+
+	defer file.Close()
+
 	ctx := context.Background()
-	ctx, cancel := context.WithTimeout(ctx, 3000*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
 
 	defer cancel()
 
@@ -32,5 +40,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println(string(body))
+	io.Copy(os.Stdout, res.Body)
+
+	_, err = file.WriteString(fmt.Sprintf("%s\n", body))
+	if err != nil {
+		panic(err)
+	}
+
 }
