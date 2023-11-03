@@ -91,7 +91,7 @@ func PersistCurrency(db *sql.DB, data *ExchangeRate) error {
 func SearchCurrency() (*USDBRL, error) {
 	log.Println("Searching currency")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://economia.awesomeapi.com.br/json/last/USD-BRL", nil)
