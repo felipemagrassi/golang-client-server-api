@@ -2,6 +2,19 @@ Simple Golang project that creates a client-server to consume an external API us
 
 ## How to run
 
+1. Run the server
+```
+cd server
+go run server.go
+```
+
+2. Run the client
+```
+cd client
+go run client.go
+```
+
+
 ## Requirements
 
 - Server should consume the external request within 200ms
