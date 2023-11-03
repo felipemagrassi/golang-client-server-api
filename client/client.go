@@ -40,9 +40,9 @@ func main() {
 		log.Fatal(err)
 	}
 
-	io.Copy(os.Stdout, res.Body)
+	fmt.Printf("Dólar: %v", string(body))
 
-	_, err = file.WriteString(fmt.Sprintf("%s\n", body))
+	_, err = file.WriteString(fmt.Sprintf("Dólar: %v\n", string(body)))
 	if err != nil {
 		panic(err)
 	}

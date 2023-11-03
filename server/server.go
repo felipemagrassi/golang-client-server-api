@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -31,67 +30,68 @@ type ExchangeRate struct {
 	CreateDate string `json:"create_date"`
 }
 
-func main() {
-	_, err := InitializeDatabase()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	http.HandleFunc("/cotacao", Handler)
-	fmt.Println("Http Server listening on port 8080")
-
-	err = http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+type ExchangeHandler struct {
+	DB *sql.DB
 }
 
-func Handler(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	e, err := SearchCurrency(ctx)
+func main() {
+	db, err := InitializeDatabase()
 	if err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	mux := http.NewServeMux()
+	mux.Handle("/cotacao", &ExchangeHandler{DB: db})
+
+	log.Fatal(http.ListenAndServe(":8080", mux))
+}
+
+func (h *ExchangeHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	data, err := SearchCurrency()
+	if err != nil {
+		log.Fatal(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 	}
 
-	err = PersistCurrency(ctx, e)
+	err = PersistCurrency(h.DB, &data.USDBRL)
 	if err != nil {
+		log.Fatal(err)
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(e.USDBRL.Bid)
+	json.NewEncoder(w).Encode(data.USDBRL.Bid)
 }
 
-func PersistCurrency(ctx context.Context, data *USDBRL) error {
+func PersistCurrency(db *sql.DB, data *ExchangeRate) error {
 	log.Println("Persisting currency")
-	db, err := sql.Open("sqlite3", "sqlite3.db")
-	if err != nil {
-		return err
-	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	stmt := `INSERT INTO USDBRL(code, codein, name, high, low, var_bid, pct_change, bid, ask, timestamp, create_date) VALUES(?,?,?,?,?,?,?,?,?,?,?)`
-	_, err = db.ExecContext(ctx, stmt, data.USDBRL.Code, data.USDBRL.Codein, data.USDBRL.Name, data.USDBRL.High, data.USDBRL.Low, data.USDBRL.VarBid, data.USDBRL.PctChange, data.USDBRL.Bid, data.USDBRL.Ask, data.USDBRL.Timestamp, data.USDBRL.CreateDate)
+	stmt, err := db.PrepareContext(ctx, "INSERT INTO exchange(code, codein, name, high, low, var_bid, pct_change, bid, ask, timestamp, create_date) VALUES(?,?,?,?,?,?,?,?,?,?,?);")
 	if err != nil {
 		return err
 	}
-	log.Println("Inserted data")
 
-	defer db.Close()
+	_, err = stmt.Exec(data.Code, data.Codein, data.Name, data.High, data.Low, data.VarBid, data.PctChange, data.Bid, data.Ask, data.Timestamp, data.CreateDate)
+	if err != nil {
+		return err
+	}
+
+	log.Println("Currency Persisted")
 
 	return nil
 }
 
-func SearchCurrency(ctx context.Context) (*USDBRL, error) {
+func SearchCurrency() (*USDBRL, error) {
 	log.Println("Searching currency")
 
-	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 2000*time.Millisecond)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://economia.awesomeapi.com.br/json/last/USD-BRL", nil)
@@ -116,14 +116,13 @@ func SearchCurrency(ctx context.Context) (*USDBRL, error) {
 		return nil, err
 	}
 
-	log.Println("Found data")
+	log.Println("Currency found")
 
 	return &e, nil
 }
 
 func InitializeDatabase() (*sql.DB, error) {
 	database, err := sql.Open("sqlite3", "sqlite3.db")
-	defer database.Close()
 
 	if err != nil {
 		return nil, err
@@ -140,23 +139,27 @@ func InitializeDatabase() (*sql.DB, error) {
 }
 
 func Migrate(db *sql.DB) error {
-	sqlStmt := `
-	CREATE TABLE IF NOT EXISTS USDBRL (
+	stmt, err := db.Prepare(`
+	CREATE TABLE IF NOT EXISTS exchange (
 		id integer primary key autoincrement,
-		code varchar(80),
-		codein varchar(80),
-		name varchar(80),
-		high varchar(80),
-		low varchar(80),
-		var_bid varchar(80),
-		pct_change varchar(80),
-		bid varchar(80),
-		ask varchar(80),
-		timestamp varchar(80),
-		create_date varchar(80)
-	)
-	`
-	_, err := db.Exec(sqlStmt)
+		code TEXT,
+		codein TEXT,
+		name TEXT,
+		high TEXT,
+		low TEXT,
+		var_bid TEXT,
+		pct_change TEXT,
+		bid TEXT,
+		ask TEXT,
+		timestamp TEXT,
+		create_date TEXT
+	);
+	`)
+	if err != nil {
+		return err
+	}
+
+	_, err = stmt.Exec()
 	if err != nil {
 		return err
 	}
